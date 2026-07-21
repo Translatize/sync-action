@@ -1,0 +1,78 @@
+name: 'Translatize Sync'
+author: 'Translatize'
+description: 'Translation management with git-like branching. Push source keys, pull completed translations, and gate PRs on missing or changed strings with the Translatize CLI.'
+
+branding:
+  icon: 'git-branch'
+  color: 'blue'
+
+inputs:
+  command:
+    description: 'Translatize CLI command to run. One of: pull, push, status.'
+    required: true
+  token:
+    description: 'Branch-bound Translatize API token (mcni_...). Create it under Project Settings -> Integrations and store it as a repository secret. Passed to the CLI as TRANSLATIZE_API_TOKEN.'
+    required: true
+  version:
+    description: 'Version of @translatize/cli on npm to run (e.g. "1.4.0"). Defaults to the latest published release.'
+    required: false
+    default: 'latest'
+  config:
+    description: 'Path to the Translatize CLI config file, relative to the workspace root.'
+    required: false
+    default: 'translatize.config.json'
+  api-url:
+    description: 'Override the Translatize API base URL (e.g. for self-hosted instances). Leave empty to use the CLI default.'
+    required: false
+    default: ''
+  args:
+    description: 'Extra CLI flags appended verbatim, whitespace-separated (e.g. "--dry-run --json" or "--fail-on-missing").'
+    required: false
+    default: ''
+  node-version:
+    description: 'Node.js version used to run the CLI.'
+    required: false
+    default: '20'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Run Translatize CLI
+      shell: bash
+      # Every caller-controlled value is passed through env and referenced as a
+      # quoted shell variable. Nothing is interpolated into the script body via
+      # ${{ }}, so a hostile input cannot break out into shell execution.
+      env:
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_API_URL: ${{ inputs.api-url }}
+        INPUT_ARGS: ${{ inputs.args }}
+        TRANSLATIZE_API_TOKEN: ${{ inputs.token }}
+      run: |
+        set -eo pipefail
+
+        # Only the three documented subcommands may be invoked.
+        case "$INPUT_COMMAND" in
+          pull|push|status) ;;
+          *)
+            echo "::error::Invalid command '$INPUT_COMMAND'. Expected one of: pull, push, status." >&2
+            exit 1
+            ;;
+        esac
+
+        CLI_ARGS=("$INPUT_COMMAND" --config "$INPUT_CONFIG")
+        if [ -n "$INPUT_API_URL" ]; then
+          CLI_ARGS+=(--api-url "$INPUT_API_URL")
+        fi
+
+        # Split extra flags on whitespace into positional words. They are treated
+        # as data, never re-evaluated by the shell.
+        read -ra EXTRA_ARGS <<< "$INPUT_ARGS"
+
+        npx --yes "@translatize/cli@${INPUT_VERSION}" "${CLI_ARGS[@]}" "${EXTRA_ARGS[@]}"
