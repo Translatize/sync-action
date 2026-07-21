@@ -1,6 +1,6 @@
 name: 'Translatize Sync'
 author: 'Translatize'
-description: 'Translation management with git-like branching. Push source keys, pull completed translations, and gate PRs on missing or changed strings with the Translatize CLI.'
+description: 'Sync Translatize translations from CI: push source keys, pull completed translations, gate PRs on missing strings.'
 
 branding:
   icon: 'git-branch'
