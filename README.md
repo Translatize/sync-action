@@ -237,16 +237,20 @@ token in Translatize immediately invalidates it.
 
 ## Publishing note
 
-This action currently lives inside the Translatize monorepo at
-`integrations/github-action`. For the GitHub Marketplace it will be mirrored to
-its **own public repository** and published as **`translatize/sync-action`**.
-Once that repo is live, reference it exactly as the examples above do:
+This action is published to the
+**[GitHub Marketplace](https://github.com/marketplace/actions/translatize-sync)**;
+its source lives at
+**[github.com/Translatize/sync-action](https://github.com/Translatize/sync-action)**.
+Reference it exactly as the examples above do:
 
 ```yaml
 uses: translatize/sync-action@v1
 ```
 
-Until the standalone repo is published, you can still consume the action by:
+### Alternatives
+
+You can also consume the action without the Marketplace – both take the same
+inputs as the published version:
 
 - **Local path** – copy this `github-action/` folder into your repository (for
   example to `.github/actions/translatize`) and reference it by path:
@@ -261,5 +265,3 @@ Until the standalone repo is published, you can still consume the action by:
   ```yaml
   uses: your-org/translatize-sync-action@<sha>
   ```
-
-Local-path and fork usage take the same inputs as the Marketplace version.
