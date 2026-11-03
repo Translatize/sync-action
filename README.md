@@ -4,7 +4,7 @@
 [`@translatize/cli`](https://www.npmjs.com/package/@translatize/cli) so you can
 keep your repository and your [Translatize](https://app.translatize.com) project
 in sync from CI – push new source keys, pull completed translations, and gate
-pull requests on missing or changed strings.
+pull requests on missing or changed strings and on translation QA errors.
 
 ---
 
@@ -17,6 +17,7 @@ The action runs a single Translatize CLI command inside your workflow:
 | `push`   | Uploads source keys from your repo to the token's Translatize branch. |
 | `pull`   | Downloads translations from the token's branch into your local files. |
 | `status` | Reports the diff between repo and branch; can fail the job on missing or changed strings. |
+| `qa`     | Runs the Translatize QA checks on the branch (placeholders, ICU, HTML tags, length, glossary…) and reads its merge gate; fails the job on errors (or warnings, with `fail-on: warning`) and whenever the gate would block the merge. |
 
 It authenticates with a **branch-bound API token** (`mcni_...`), which the action
 passes to the CLI as the `TRANSLATIZE_API_TOKEN` environment variable. A token
@@ -30,8 +31,9 @@ Under the hood the step runs:
 npx --yes @translatize/cli@<version> <command> --config <config> [--api-url <api-url>] <args>
 ```
 
-`status` follows the CLI exit-code contract – `0` on success; `1` when a
-`--fail-on-*` gate trips **or** an API/execution error occurs (e.g. an expired
+`status` and `qa` follow the CLI exit-code contract – `0` on success; `1` when a
+gate trips (a `--fail-on-*` flag of `status`, QA issues at the `fail-on` severity,
+or a blocked merge gate) **or** an API/execution error occurs (e.g. an expired
 token); `2` on a usage or configuration error (bad flags, missing/invalid config,
 no token) – so a failed check fails the job.
 
@@ -172,18 +174,50 @@ jobs:
 > string changed but its translations were not updated. Pass both to enforce
 > either condition.
 
+### (d) Block a PR on translation QA errors
+
+Run `qa` on pull requests so broken placeholders, invalid ICU messages, text over
+its character limit or glossary violations turn the check red. With a
+`create-own` token that works on a feature branch, pass `--branch` through `args`
+and the step also reads that branch's merge gate into the token's base branch.
+
+```yaml
+name: Translation QA
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail on QA errors
+        uses: translatize/sync-action@v1
+        with:
+          command: qa
+          token: ${{ secrets.TRANSLATIZE_TOKEN }}
+          fail-on: error
+```
+
+> Set `fail-on: warning` to fail on warnings too. Info-level findings never fail
+> the step. Add `--json` to `args` to get the full report in the log.
+
 ---
 
 ## Inputs
 
 | Input          | Required | Default                    | Description |
 | -------------- | -------- | -------------------------- | ----------- |
-| `command`      | yes      | –                          | CLI command to run: `pull`, `push`, or `status`. Any other value fails the step. |
+| `command`      | yes      | –                          | CLI command to run: `pull`, `push`, `status`, or `qa`. Any other value fails the step. |
 | `token`        | yes      | –                          | Branch-bound Translatize API token (`mcni_...`). Passed to the CLI as `TRANSLATIZE_API_TOKEN`. Use a secret. |
 | `version`      | no       | `latest`                   | `@translatize/cli` npm version to run (e.g. `1.4.0`). |
 | `config`       | no       | `translatize.config.json`  | Path to the CLI config file, relative to the workspace. |
 | `api-url`      | no       | `""`                       | Override the Translatize API base URL (self-hosted / staging). Empty uses the CLI default. |
-| `args`         | no       | `""`                       | Extra CLI flags appended verbatim, e.g. `--dry-run`, `--json`, `--fail-on-missing`, `--fail-on-diff`. |
+| `fail-on`      | no       | `error`                    | Only for `qa`: the lowest severity that fails the step, `error` or `warning`. A blocked merge gate always fails it. |
+| `args`         | no       | `""`                       | Extra CLI flags appended verbatim, e.g. `--dry-run`, `--json`, `--fail-on-missing`, `--fail-on-diff`, `--branch <name>`. |
 | `node-version` | no       | `24`                       | Node.js version used to run the CLI. |
 
 This action has no outputs – surface results through the step's exit status
@@ -227,8 +261,9 @@ token in Translatize immediately invalidates it.
   referenced as quoted shell variables – no `${{ inputs.* }}` value is ever
   interpolated into the shell script, which closes the usual script-injection
   hole in composite actions.
-- The `command` input is validated against `pull | push | status`; anything else
-  fails the step before the CLI runs.
+- The `command` input is validated against `pull | push | status | qa`, and
+  `fail-on` against `error | warning`; anything else fails the step before the
+  CLI runs.
 - Pin third-party actions to a tag or, for stronger supply-chain guarantees, to a
   full commit SHA (this action, `actions/checkout`, `actions/setup-node`, and
   `peter-evans/create-pull-request`).

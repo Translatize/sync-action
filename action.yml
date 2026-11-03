@@ -1,6 +1,6 @@
 name: 'Translatize Sync'
 author: 'Translatize'
-description: 'Sync Translatize translations from CI: push source keys, pull completed translations, gate PRs on missing strings.'
+description: 'Sync Translatize translations from CI: push source keys, pull translations, gate PRs on missing strings and QA errors.'
 
 branding:
   icon: 'git-branch'
@@ -8,7 +8,7 @@ branding:
 
 inputs:
   command:
-    description: 'Translatize CLI command to run. One of: pull, push, status.'
+    description: 'Translatize CLI command to run. One of: pull, push, status, qa.'
     required: true
   token:
     description: 'Branch-bound Translatize API token (mcni_...). Create it under Project Settings -> Integrations and store it as a repository secret. Passed to the CLI as TRANSLATIZE_API_TOKEN.'
@@ -25,8 +25,12 @@ inputs:
     description: 'Override the Translatize API base URL (e.g. for self-hosted instances). Leave empty to use the CLI default.'
     required: false
     default: ''
+  fail-on:
+    description: 'Only for command qa: the lowest QA severity that fails the step, error or warning. A merge gate that blocks always fails it.'
+    required: false
+    default: 'error'
   args:
-    description: 'Extra CLI flags appended verbatim, whitespace-separated (e.g. "--dry-run --json" or "--fail-on-missing").'
+    description: 'Extra CLI flags appended verbatim, whitespace-separated (e.g. "--dry-run --json", "--fail-on-missing" or "--branch feature-x").'
     required: false
     default: ''
   node-version:
@@ -53,15 +57,16 @@ runs:
         INPUT_CONFIG: ${{ inputs.config }}
         INPUT_API_URL: ${{ inputs.api-url }}
         INPUT_ARGS: ${{ inputs.args }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
         TRANSLATIZE_API_TOKEN: ${{ inputs.token }}
       run: |
         set -eo pipefail
 
-        # Only the three documented subcommands may be invoked.
+        # Only the documented subcommands may be invoked.
         case "$INPUT_COMMAND" in
-          pull|push|status) ;;
+          pull|push|status|qa) ;;
           *)
-            echo "::error::Invalid command '$INPUT_COMMAND'. Expected one of: pull, push, status." >&2
+            echo "::error::Invalid command '$INPUT_COMMAND'. Expected one of: pull, push, status, qa." >&2
             exit 1
             ;;
         esac
@@ -69,6 +74,15 @@ runs:
         CLI_ARGS=("$INPUT_COMMAND" --config "$INPUT_CONFIG")
         if [ -n "$INPUT_API_URL" ]; then
           CLI_ARGS+=(--api-url "$INPUT_API_URL")
+        fi
+        if [ "$INPUT_COMMAND" = "qa" ]; then
+          case "$INPUT_FAIL_ON" in
+            error|warning) CLI_ARGS+=(--fail-on "$INPUT_FAIL_ON") ;;
+            *)
+              echo "::error::Invalid fail-on '$INPUT_FAIL_ON'. Expected error or warning." >&2
+              exit 1
+              ;;
+          esac
         fi
 
         # Split extra flags on whitespace into positional words. They are treated
