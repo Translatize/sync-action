@@ -207,13 +207,162 @@ jobs:
 
 ---
 
+## Formats and presets
+
+The action runs the CLI, so it handles every format the CLI does. Nothing changes in
+the workflow: the format and paths live in `translatize.config.json`. Create that
+file with a preset, or write it by hand:
+
+```bash
+npx @translatize/cli init --preset android
+```
+
+Each recipe above works with any of these. Only the `paths:` filter of a push
+workflow follows the preset, so it fires when your source file changes.
+
+| Preset | `format` | Source file for `paths:` (source language `en`) |
+| ------ | -------- | ------------------------------------------------ |
+| `android` | `android` | `app/src/main/res/values/strings.xml` |
+| `ios-strings` | `ios` | `en.lproj/Localizable.strings` |
+| `xcstrings` | `xcstrings` | `Localizable.xcstrings` |
+| `flutter` | `arb` | `lib/l10n/app_en.arb` |
+| `gettext` | `po` | `locale/en/LC_MESSAGES/messages.po` |
+| `resx` | `resx` | `Resources.resx` |
+
+For the other formats and the fields used below, see the
+[CLI documentation](https://www.npmjs.com/package/@translatize/cli).
+
+### Android
+
+```json
+{
+  "projectId": "your-project-id",
+  "format": "android",
+  "files": "app/src/main/res/values-{lang}/strings.xml",
+  "sourceFile": "app/src/main/res/values/strings.xml",
+  "localeMap": { "zh-TW": "zh-rTW" }
+}
+```
+
+`sourceFile` is the default language's `values/` folder. `localeMap` gives a language
+its Android spelling, so `zh-TW` lands in `values-zh-rTW/`.
+
+```yaml
+name: Push Android strings to Translatize
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/src/main/res/values/strings.xml'
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: translatize/sync-action@v1
+        with:
+          command: push
+          token: ${{ secrets.TRANSLATIZE_TOKEN }}
+```
+
+### iOS `.strings`
+
+```json
+{
+  "projectId": "your-project-id",
+  "format": "ios",
+  "files": "{lang}.lproj/Localizable.strings"
+}
+```
+
+Keep the paths relative to the config file, and put it next to your `.lproj` folders
+or spell the folder out, e.g. `MyApp/{lang}.lproj/Localizable.strings`.
+
+### Xcode String Catalog
+
+One file holds every language, so `files` has no `{lang}`:
+
+```json
+{
+  "projectId": "your-project-id",
+  "format": "xcstrings",
+  "files": "Localizable.xcstrings"
+}
+```
+
+### Flutter
+
+```json
+{
+  "projectId": "your-project-id",
+  "format": "arb",
+  "files": "lib/l10n/app_{lang}.arb"
+}
+```
+
+Pull before `flutter gen-l10n` so the build sees the latest translations:
+
+```yaml
+- uses: translatize/sync-action@v1
+  with:
+    command: pull
+    token: ${{ secrets.TRANSLATIZE_TOKEN }}
+
+- run: flutter gen-l10n
+```
+
+### gettext
+
+```json
+{
+  "projectId": "your-project-id",
+  "format": "po",
+  "files": "locale/{lang}/LC_MESSAGES/messages.po"
+}
+```
+
+### .NET resources
+
+```json
+{
+  "projectId": "your-project-id",
+  "format": "resx",
+  "files": "Resources.{lang}.resx",
+  "sourceFile": "Resources.resx"
+}
+```
+
+The default language lives in `Resources.resx`, without a suffix.
+
+### What to expect in CI
+
+`status` and `push` send your files to the Translatize API to be read, unless the
+format is `json-nested` or `json-flat`. The API reads them and stores nothing, and
+they count towards the token's rate limit. A `pull` that changes nothing leaves your
+files untouched, so a nightly pull only opens a pull request when a translation
+changed. It rewrites a file that did change from the export, so comments in it go.
+
+A key with no translation is left out of that language's file, so your app falls back
+to its default language instead of showing a blank. `xliff` and `po` keep it empty for
+translators, and a file holding every language keeps it too. `status --fail-on-missing` still counts such a key as missing, and
+`push` never deletes it.
+
+In a monorepo, keep the config next to the app and point `config` at it. Paths may
+leave that directory, e.g. `../../packages/i18n/{lang}.json`, as long as they stay
+inside the repository.
+
+---
+
 ## Inputs
 
 | Input          | Required | Default                    | Description |
 | -------------- | -------- | -------------------------- | ----------- |
 | `command`      | yes      | –                          | CLI command to run: `pull`, `push`, `status`, or `qa`. Any other value fails the step. |
 | `token`        | yes      | –                          | Branch-bound Translatize API token (`mcni_...`). Passed to the CLI as `TRANSLATIZE_API_TOKEN`. Use a secret. |
-| `version`      | no       | `latest`                   | `@translatize/cli` npm version to run (e.g. `1.4.0`). |
+| `version`      | no       | `latest`                   | `@translatize/cli` npm version to run (e.g. `0.2.0`). |
 | `config`       | no       | `translatize.config.json`  | Path to the CLI config file, relative to the workspace. |
 | `api-url`      | no       | `""`                       | Override the Translatize API base URL (self-hosted / staging). Empty uses the CLI default. |
 | `fail-on`      | no       | `error`                    | Only for `qa`: the lowest severity that fails the step, `error` or `warning`. A blocked merge gate always fails it. |
@@ -233,9 +382,12 @@ This action has no outputs – surface results through the step's exit status
   **`TRANSLATIZE_TOKEN`** and reference it as
   `token: ${{ secrets.TRANSLATIZE_TOKEN }}`. Never paste the raw token into a
   workflow file.
-- A token carries its own **role** (translator can write translations;
-  developer/admin/owner can also create source keys) and may be **IP-allowlisted**
-  or given an **expiry** – set these to match what the workflow needs.
+- A token carries its own **role**. A translator token can read and write label
+  values, which includes the new keys `push` creates. Developer and up can also set
+  context and tags, and work with branches. Merging into `main` needs the admin
+  role. None of the four commands here merges, so a translator token is enough for
+  them. A token may also be **IP-allowlisted** or given an **expiry** – set these to
+  match what the workflow needs.
 
 ### One token per branch
 

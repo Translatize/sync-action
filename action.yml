@@ -14,7 +14,7 @@ inputs:
     description: 'Branch-bound Translatize API token (mcni_...). Create it under Project Settings -> Integrations and store it as a repository secret. Passed to the CLI as TRANSLATIZE_API_TOKEN.'
     required: true
   version:
-    description: 'Version of @translatize/cli on npm to run (e.g. "1.4.0"). Defaults to the latest published release.'
+    description: 'Version of @translatize/cli on npm to run (e.g. "0.3.0"). Defaults to the latest published release.'
     required: false
     default: 'latest'
   config:
